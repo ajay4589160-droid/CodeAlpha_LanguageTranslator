@@ -1,90 +1,205 @@
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const { GoogleGenAI } = require("@google/genai");
 
 const app = express();
 
+// ===============================
+// Middleware
+// ===============================
+
 app.use(cors());
 app.use(express.json());
 
-// Frontend
-app.use(express.static("/public"));
+// ===============================
+// Serve Frontend
+// ===============================
+
+// IMPORTANT:
+// Do NOT use /public here.
+// Your index.html is in the repository root.
+
+app.use(express.static(__dirname));
+
+
+// ===============================
+// Gemini API
+// ===============================
+
+const apiKey = process.env.GEMINI_API_KEY;
+
+let ai = null;
+
+if (apiKey) {
+    ai = new GoogleGenAI({
+        apiKey: apiKey
+    });
+
+    console.log("Gemini API configured successfully.");
+} else {
+    console.error("WARNING: GEMINI_API_KEY is not configured.");
+}
+
+
+// ===============================
+// Home Page
+// ===============================
 
 app.get("/", (req, res) => {
-    res.sendFile("/public/index.html");
+
+    res.sendFile(
+        path.join(__dirname, "index.html")
+    );
+
 });
 
-// Gemini
-const ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY
-});
+
+// ===============================
+// Translation API
+// ===============================
 
 app.post("/translate", async (req, res) => {
+
     try {
-        const { text, source, target } = req.body;
+
+        const {
+            text,
+            source,
+            target
+        } = req.body;
+
+
+        // Check input
 
         if (!text || !source || !target) {
+
             return res.status(400).json({
+
                 error: "Missing translation data"
+
             });
+
         }
 
-        const languageNames = {
-            en: "English",
-            ta: "Tamil",
-            te: "Telugu",
-            hi: "Hindi",
-            ml: "Malayalam",
-            kn: "Kannada",
-            fr: "French",
-            de: "German",
-            es: "Spanish"
-        };
 
-        const sourceName = languageNames[source] || source;
-        const targetName = languageNames[target] || target;
+        // Check Gemini API
 
-        const prompt = `Translate the following text.
+        if (!ai) {
 
-Source language: ${sourceName}
-Target language: ${targetName}
+            return res.status(500).json({
 
-Return ONLY the translation.
-Do not explain.
-Do not answer the text.
-Do not add quotation marks.
+                error:
+                    "Gemini API key is not configured on the server."
+
+            });
+
+        }
+
+
+        // Translation prompt
+
+        const prompt = `
+Translate the following text from ${source} to ${target}.
+
+Important rules:
+
+1. Return ONLY the translated text.
+2. Do not explain the translation.
+3. Do not add quotation marks.
+4. Preserve names, numbers, emojis and punctuation when appropriate.
+5. Keep the original meaning.
+6. If the text is already in the target language, return it naturally.
 
 Text:
-${text}`;
+${text}
+`;
 
-        // Use a model available to your API key.
-        // We will verify the model if this one is unavailable.
-        const response = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: prompt
-        });
 
-        const translation = response.text?.trim();
+        // Call Gemini
+
+        const response =
+            await ai.models.generateContent({
+
+                model: "gemini-2.5-flash",
+
+                contents: prompt
+
+            });
+
+
+        // Get result
+
+        const translation =
+            response.text?.trim();
+
+
+        // Check result
 
         if (!translation) {
-            throw new Error("Gemini returned an empty response");
+
+            return res.status(500).json({
+
+                error:
+                    "Gemini did not return a translation."
+
+            });
+
         }
 
-        console.log("Translation:", translation);
+
+        // Send result
 
         res.json({
+
             translation: translation
+
         });
+
 
     } catch (error) {
-        console.error("Gemini error:", error);
+
+        console.error(
+            "Gemini translation error:",
+            error
+        );
+
 
         res.status(500).json({
-            error: "Gemini translation failed"
+
+            error:
+                "Gemini translation failed."
+
         });
+
     }
+
 });
 
-app.listen(3000, () => {
-    console.log("Gemini Translator running on port 3000");
-});
+
+// ===============================
+// Render Port
+// ===============================
+
+// Render provides the PORT environment variable.
+// Locally it will use 3000.
+
+const PORT =
+    process.env.PORT || 3000;
+
+
+// ===============================
+// Start Server
+// ===============================
+
+app.listen(
+    PORT,
+    "0.0.0.0",
+    () => {
+
+        console.log(
+            `Gemini Translator running on port ${PORT}`
+        );
+
+    }
+);
